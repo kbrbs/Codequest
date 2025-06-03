@@ -109,11 +109,11 @@ async function checkUserRole(userId) {
             if (adminData.role === 'Super Admin') {
                 console.log('Redirecting to super admin dashboard');
                 localStorage.setItem('userRole', 'super_admin');
-                window.location.href = '../superAdmin/dashboard.html';
+                window.location.href = 'superAdmin/dashboard.html';
             } else if (adminData.role === 'Admin') {
                 console.log('Redirecting to admin dashboard');
                 localStorage.setItem('userRole', 'admin');
-                window.location.href = '../admin/dashboard.html';
+                window.location.href = 'admin/dashboard.html';
             } else {
                 // Default redirect for other roles
                 console.log('Redirecting to default dashboard');
