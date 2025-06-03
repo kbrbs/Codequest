@@ -1,23 +1,20 @@
-// Admin Management JavaScript
-
-// Initialize Firebase from the config
-const firebaseConfig = {
-    apiKey: "AIzaSyA-rXYqdJ5ujIxWNt4PjSJh4FtDyc3hieI",
-    authDomain: "codequest-2025.firebaseapp.com",
-    projectId: "codequest-2025",
-    storageBucket: "codequest-2025.firebasestorage.app",
-    messagingSenderId: "5857953993",
-    appId: "1:5857953993:web:79cc6a52b3baf9b7b52518"
-};
-
-// Initialize Firebase if not already initialized
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
-
-// References to Firebase services
-const auth = firebase.auth();
-const db = firebase.firestore();
+import { 
+    EmailAuthProvider,
+    createUserWithEmailAndPassword,
+    sendPasswordResetEmail,
+    reauthenticateWithCredential
+} from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+import { 
+    collection, 
+    doc,
+    getDoc,
+    query,
+    where,
+    getDocs,
+    serverTimestamp,
+    setDoc 
+} from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+import { auth, db } from './firebase-config.js';
 
 // DOM Elements
 const loadingElement = document.getElementById('loading');
@@ -41,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
             checkUserRole(user.uid);
         } else {
             // Redirect to login page if not authenticated
-            window.location.href = 'login.html';
+            window.location.href = '../index.html';
         }
     });
 });
@@ -49,17 +46,15 @@ document.addEventListener('DOMContentLoaded', () => {
 // Check if the user is a Super Admin
 async function checkUserRole(userId) {
     try {
-        const userDoc = await db.collection('admins').doc(userId).get();
+        const userDocRef = doc(db, 'admins', userId);
+        const userDoc = await getDoc(userDocRef);
         
-        if (userDoc.exists && userDoc.data().role === 'Super Admin') {
+        if (userDoc.exists() && userDoc.data().role === 'Super Admin') {
             // User is a Super Admin, load admins
             loadAdmins();
         } else {
             // User is not a Super Admin, redirect to dashboard
-            showAlert('Access denied. You do not have Super Admin privileges.', 'error');
-            setTimeout(() => {
-                window.location.href = 'index.html';
-            }, 2000);
+            window.location.href = '../admin/dashboard.html';
         }
     } catch (error) {
         console.error('Error checking user role:', error);
@@ -73,18 +68,17 @@ async function loadAdmins() {
         loadingElement.style.display = 'block';
         adminsTable.style.display = 'none';
         
-        const adminsSnapshot = await db.collection('admins').get();
+        const adminsRef = collection(db, 'admins');
+        const adminsQuery = query(adminsRef, where('role', '==', 'Admin'));
+        const adminsSnapshot = await getDocs(adminsQuery);
         
-        // Clear existing rows
         adminsTbody.innerHTML = '';
         
         if (adminsSnapshot.empty) {
-            // No admins found
             const noDataRow = document.createElement('tr');
             noDataRow.innerHTML = '<td colspan="7" style="text-align: center;">No admins found</td>';
             adminsTbody.appendChild(noDataRow);
         } else {
-            // Add each admin to the table
             adminsSnapshot.forEach(doc => {
                 const admin = doc.data();
                 const adminRow = createAdminRow(doc.id, admin);
@@ -92,7 +86,6 @@ async function loadAdmins() {
             });
         }
         
-        // Hide loading and show table
         loadingElement.style.display = 'none';
         adminsTable.style.display = 'table';
         
@@ -220,37 +213,42 @@ async function addAdmin() {
     addButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
     
     try {
+        // Store current Super Admin user
+        const superAdmin = auth.currentUser;
+        
         // Re-authenticate current user to verify password
-        const currentUser = auth.currentUser;
-        const credential = firebase.auth.EmailAuthProvider.credential(
-            currentUser.email,
+        const credential = EmailAuthProvider.credential(
+            superAdmin.email,
             superAdminPassword
         );
         
-        await currentUser.reauthenticateWithCredential(credential);
+        await reauthenticateWithCredential(superAdmin, credential);
         
-        // Create new user in Firebase Authentication
-        const userCredential = await auth.createUserWithEmailAndPassword(email, generateTempPassword());
-        const newUserId = userCredential.user.uid;
+        // Create new user account for admin with a temporary password
+        const tempPassword = generateTempPassword();
+        const { user: newAdmin } = await createUserWithEmailAndPassword(auth, email, tempPassword);
         
-        // Send password reset email
-        await auth.sendPasswordResetEmail(email);
+        // Create the document reference
+        const adminDocRef = doc(db, 'admins', newAdmin.uid);
         
-        // Add admin to Firestore
-        await db.collection('admins').doc(newUserId).set({
+        // Set admin data in Firestore
+        await setDoc(adminDocRef, {
             adminId: adminId,
             name: name,
             email: email,
             role: 'Admin',
             isActive: true,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            createdBy: currentUser.uid
+            createdAt: serverTimestamp(),
+            createdBy: superAdmin.uid
         });
+        
+        // Send password reset email to new admin
+        await sendPasswordResetEmail(auth, email);
         
         // Close modal and reload admins
         closeAddModal();
         showAlert(`Admin ${name} added successfully. Password reset email sent.`, 'success');
-        loadAdmins();
+        // loadAdmins();
         
     } catch (error) {
         console.error('Error adding admin:', error);
@@ -295,19 +293,17 @@ async function updateAdmin() {
     editButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
     
     try {
-        // Re-authenticate current user to verify password
         const currentUser = auth.currentUser;
-        const credential = firebase.auth.EmailAuthProvider.credential(
+        const credential = EmailAuthProvider.credential(
             currentUser.email,
             superAdminPassword
         );
         
-        await currentUser.reauthenticateWithCredential(credential);
+        await reauthenticateWithCredential(currentUser, credential);
         
-        // Update admin in Firestore
         await db.collection('admins').doc(currentAdminId).update({
             name: name,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: serverTimestamp(),
             updatedBy: currentUser.uid
         });
         
@@ -385,14 +381,13 @@ async function blockAdmin() {
     confirmButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
     
     try {
-        // Re-authenticate current user to verify password
         const currentUser = auth.currentUser;
-        const credential = firebase.auth.EmailAuthProvider.credential(
+        const credential = EmailAuthProvider.credential(
             currentUser.email,
             superAdminPassword
         );
         
-        await currentUser.reauthenticateWithCredential(credential);
+        await reauthenticateWithCredential(currentUser, credential);
         
         // Get admin data to log
         const adminDoc = await db.collection('admins').doc(currentAdminId).get();
@@ -401,7 +396,7 @@ async function blockAdmin() {
         // Update admin status in Firestore
         await db.collection('admins').doc(currentAdminId).update({
             isActive: false,
-            blockedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            blockedAt: serverTimestamp(),
             blockedBy: currentUser.uid
         });
         
@@ -412,7 +407,7 @@ async function blockAdmin() {
             adminEmail: adminData.email,
             performedBy: currentUser.uid,
             performedByEmail: currentUser.email,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            timestamp: serverTimestamp()
         });
         
         // Close modal and reload admins
@@ -453,14 +448,13 @@ async function unblockAdmin() {
     confirmButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
     
     try {
-        // Re-authenticate current user to verify password
         const currentUser = auth.currentUser;
-        const credential = firebase.auth.EmailAuthProvider.credential(
+        const credential = EmailAuthProvider.credential(
             currentUser.email,
             superAdminPassword
         );
         
-        await currentUser.reauthenticateWithCredential(credential);
+        await reauthenticateWithCredential(currentUser, credential);
         
         // Get admin data to log
         const adminDoc = await db.collection('admins').doc(currentAdminId).get();
@@ -469,7 +463,7 @@ async function unblockAdmin() {
         // Update admin status in Firestore
         await db.collection('admins').doc(currentAdminId).update({
             isActive: true,
-            unblockedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            unblockedAt: serverTimestamp(),
             unblockedBy: currentUser.uid
         });
         
@@ -480,7 +474,7 @@ async function unblockAdmin() {
             adminEmail: adminData.email,
             performedBy: currentUser.uid,
             performedByEmail: currentUser.email,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            timestamp: serverTimestamp()
         });
         
         // Close modal and reload admins
