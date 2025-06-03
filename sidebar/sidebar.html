@@ -1,0 +1,91 @@
+<!-- Sidebar Component -->
+<nav class="sidebar">
+    <div class="logo-container">
+        <div class="logo">
+            <img src="../img/logo.jpg" alt="CodeQuest Logo">
+        </div>
+    </div>
+    
+    <!-- Admin Navigation -->
+    <ul class="nav-menu admin-nav">
+        <li class="nav-item" data-page="index">
+            <a href="index.html" class="nav-link">
+                <i class="fas fa-chart-bar"></i>
+                <span>Dashboard</span>
+            </a>
+        </li>
+        <li class="nav-item" data-page="student-management">
+            <a href="student-management.html" class="nav-link">
+                <i class="fas fa-user-graduate"></i>
+                <span>Student Management</span>
+            </a>
+        </li>
+        <li class="nav-item" data-page="class-management">
+            <a href="class-management.html" class="nav-link">
+                <i class="fas fa-graduation-cap"></i>
+                <span>Class Management</span>
+            </a>
+        </li>
+        <li class="nav-item" data-page="content-management">
+            <a href="content-management.html" class="nav-link">
+                <i class="fas fa-file-alt"></i>
+                <span>Content Management</span>
+            </a>
+        </li>
+        <li class="nav-item" data-page="user-progress">
+            <a href="user-progress.html" class="nav-link">
+                <i class="fas fa-chart-line"></i>
+                <span>User Progress</span>
+            </a>
+        </li>
+        <li class="nav-item" data-page="leaderboard">
+            <a href="leaderboard.html" class="nav-link">
+                <i class="fas fa-trophy"></i>
+                <span>Leaderboard</span>
+            </a>
+        </li>
+    </ul>
+    
+    <!-- Super Admin Navigation -->
+    <ul class="nav-menu super-admin-nav">
+        <li class="nav-item" data-page="index">
+            <a href=".../superAdmin/dashboard.html" class="nav-link">
+                <i class="fas fa-chart-bar"></i>
+                <span>Dashboard</span>
+            </a>
+        </li>
+        <li class="nav-item" data-page="admin-management">
+            <a href=".../superAdmin/admin-management.html" class="nav-link">
+                <i class="fas fa-users-cog"></i>
+                <span>Admin Management</span>
+            </a>
+        </li>
+        <li class="nav-item" data-page="class-management">
+            <a href=".../superAdmin/class-management.html" class="nav-link">
+                <i class="fas fa-graduation-cap"></i>
+                <span>Class Management</span>
+            </a>
+        </li>
+        <li class="nav-item" data-page="content-management">
+            <a href=".../superAdmin/content-management.html" class="nav-link">
+                <i class="fas fa-file-alt"></i>
+                <span>Content Management</span>
+            </a>
+        </li>
+    </ul>
+    
+    <div class="user-info">
+        <div class="user-avatar">
+            <i class="fas fa-user"></i>
+        </div>
+        <div class="user-details">
+            <div class="user-role" id="user-role-display">ADMIN</div>
+            <div class="user-status">Logged In</div>
+        </div>
+        <div class="role-toggle">
+            <button id="role-switch" title="Switch Role">
+                <i class="fas fa-exchange-alt"></i>
+            </button>
+        </div>
+    </div>
+</nav>
