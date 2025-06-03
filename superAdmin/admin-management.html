@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Management - CodeQuest</title>
+    <link rel="stylesheet" href="../css/alert.css">
     <link rel="stylesheet" href="../css/styles.css">
     <link rel="stylesheet" href="../css/sidebar.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -27,17 +28,19 @@
                         </button>
                     </div>
 
-                    <div id="loading" class="loading" style="display: none;">
+                    <div id="loading" class="loading">
                         <div class="spinner"></div>
                         Loading admins...
                     </div>
 
-                    <table id="admins-table">
+                    <table id="admins-table" style="display: none;">
                         <thead>
                             <tr>
+                                <th>Admin ID</th>
                                 <th>Name</th>
                                 <th>Email</th>
                                 <th>Role</th>
+                                <th>Status</th>
                                 <th>Created At</th>
                                 <th style="text-align: right;">Actions</th>
                             </tr>
@@ -51,17 +54,22 @@
         </main>
     </div>
 
-    <!-- Add/Edit Admin Modal -->
-    <div id="adminModal" class="modal">
+    <!-- Add Admin Modal -->
+    <div id="addAdminModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 class="modal-title" id="modal-title">Add New Admin</h3>
-                <button class="close" onclick="closeModal()">&times;</button>
+                <h3 class="modal-title">Add New Admin</h3>
+                <button class="close" onclick="closeAddModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <form id="admin-form">
+                <form id="add-admin-form">
                     <div class="form-group">
-                        <label for="admin-name">Name</label>
+                        <label for="admin-id">Admin ID</label>
+                        <input type="text" id="admin-id" class="form-control" readonly>
+                        <small class="form-text">Auto-generated ID</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-name">Full Name</label>
                         <input type="text" id="admin-name" class="form-control" required>
                     </div>
                     <div class="form-group">
@@ -69,27 +77,92 @@
                         <input type="email" id="admin-email" class="form-control" required>
                     </div>
                     <div class="form-group">
-                        <label for="admin-password">Password</label>
-                        <input type="password" id="admin-password" class="form-control" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="admin-role">Role</label>
-                        <select id="admin-role" class="form-control">
-                            <option value="admin">Admin</option>
-                            <option value="super_admin">Super Admin</option>
-                        </select>
+                        <label for="super-admin-password">Your Password (for verification)</label>
+                        <input type="password" id="super-admin-password" class="form-control" required>
+                        <small class="form-text">Enter your Super Admin password to confirm this action</small>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="saveAdmin()">Save Admin</button>
+                <button class="btn btn-secondary" onclick="closeAddModal()">Cancel</button>
+                <button id="add-admin-btn" class="btn btn-primary" onclick="addAdmin()">Add Admin</button>
             </div>
         </div>
     </div>
 
-    <!-- Load sidebar first, then other scripts -->
-    <script type="module" src="../js/sidebar.js"></script>
-    <script type="module" src="../js/firebase-config.js"></script>
+    <!-- Edit Admin Modal -->
+    <div id="editAdminModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Edit Admin</h3>
+                <button class="close" onclick="closeEditModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="edit-admin-form">
+                    <input type="hidden" id="edit-admin-uid">
+                    <div class="form-group">
+                        <label for="edit-admin-id">Admin ID</label>
+                        <input type="text" id="edit-admin-id" class="form-control" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-admin-name">Full Name</label>
+                        <input type="text" id="edit-admin-name" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-admin-email">Email</label>
+                        <input type="email" id="edit-admin-email" class="form-control" readonly>
+                        <small class="form-text">Email cannot be changed</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-super-admin-password">Your Password (for verification)</label>
+                        <input type="password" id="edit-super-admin-password" class="form-control" required>
+                        <small class="form-text">Enter your Super Admin password to confirm this action</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+                <button id="edit-admin-btn" class="btn btn-primary" onclick="updateAdmin()">Update Admin</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmationModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="confirmation-title">Confirm Action</h3>
+                <button class="close" onclick="closeConfirmationModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmation-message">Are you sure you want to proceed with this action?</p>
+                <div class="form-group">
+                    <label for="confirmation-password">Your Password (for verification)</label>
+                    <input type="password" id="confirmation-password" class="form-control" required>
+                    <small class="form-text">Enter your Super Admin password to confirm this action</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeConfirmationModal()">Cancel</button>
+                <button id="confirm-action-btn" class="btn btn-danger">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success/Error Alert -->
+    <div id="alert" class="alert" style="display: none;">
+        <span id="alert-message"></span>
+        <button class="close-alert" onclick="closeAlert()">&times;</button>
+    </div>
+
+    <!-- Load Firebase scripts -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <!-- Load sidebar and admin management scripts -->
+    <script src="../js/firebase-config.js"></script>
+    <script src="../js/sidebar.js"></script>
+    <script src="../js/admin-management.js"></script>
 </body>
 </html>
