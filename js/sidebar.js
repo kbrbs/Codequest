@@ -11,7 +11,7 @@ class SidebarManager {
 
     async loadSidebar() {
         try {
-            const response = await fetch('sidebar.html');
+            const response = await fetch('../sidebar/sidebar.html');
             const sidebarHTML = await response.text();
             
             // Find the sidebar container or create one
