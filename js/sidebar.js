@@ -144,14 +144,14 @@ class SidebarManager {
             localStorage.removeItem('userRole');
             
             // Redirect to login page
-            window.location.href = '../auth/index.html';
+            window.location.href = '../index.html';
         } catch (error) {
             console.error('Error signing out:', error);
         }
     } else {
         // Fallback if Firebase is not available
         localStorage.removeItem('userRole');
-        window.location.href = '../auth/index.html';
+        window.location.href = '../index.html';
     }
 }
 
