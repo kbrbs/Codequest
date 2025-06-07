@@ -18,6 +18,7 @@ import {
     addDoc
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import { auth, db } from './firebase-config.js';
+import { deleteDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
 // Initialize EmailJS - make sure this matches your EmailJS account
 const EMAILJS_SERVICE_ID = "service_fxw9h0p";
@@ -111,9 +112,18 @@ function createAdminRow(id, admin) {
     // Format date
     const createdAt = admin.createdAt ? new Date(admin.createdAt.toDate()).toLocaleDateString() : 'N/A';
     
-    // Status badge class
-    const statusClass = admin.isActive ? 'badge-beginner' : 'badge-advanced';
-    const statusText = admin.isActive ? 'Active' : 'Blocked';
+    // Status badge class - show different status for first login
+    let statusClass, statusText;
+    if (!admin.authAccountCreated) {
+        statusClass = 'badge-intermediate';
+        statusText = 'Pending First Login';
+    } else if (admin.isActive) {
+        statusClass = 'badge-beginner';
+        statusText = 'Active';
+    } else {
+        statusClass = 'badge-advanced';
+        statusText = 'Blocked';
+    }
     
     row.innerHTML = `
         <td>${admin.adminId || 'N/A'}</td>
@@ -126,12 +136,17 @@ function createAdminRow(id, admin) {
             <button class="btn-icon edit-btn" title="Edit Admin" onclick="openEditModal('${id}')">
                 <i class="fas fa-edit"></i>
             </button>
-            ${admin.isActive ? 
-                `<button class="btn-icon delete-btn" title="Block Admin" onclick="confirmBlockAdmin('${id}')">
-                    <i class="fas fa-ban"></i>
-                </button>` : 
-                `<button class="btn-icon restore-btn" title="Unblock Admin" onclick="confirmUnblockAdmin('${id}')">
-                    <i class="fas fa-undo"></i>
+            ${admin.authAccountCreated ? 
+                (admin.isActive ? 
+                    `<button class="btn-icon delete-btn" title="Block Admin" onclick="confirmBlockAdmin('${id}')">
+                        <i class="fas fa-ban"></i>
+                    </button>` : 
+                    `<button class="btn-icon restore-btn" title="Unblock Admin" onclick="confirmUnblockAdmin('${id}')">
+                        <i class="fas fa-undo"></i>
+                    </button>`
+                ) :
+                `<button class="btn-icon delete-btn" title="Delete Pending Admin" onclick="confirmDeletePendingAdmin('${id}')">
+                    <i class="fas fa-trash"></i>
                 </button>`
             }
         </td>
@@ -225,24 +240,32 @@ async function addAdmin() {
     addButton.disabled = true;
     addButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
     
-    // Store current user info
     const currentUser = auth.currentUser;
-    const superAdminEmail = currentUser.email;
     
     try {
         // Step 1: Re-authenticate super admin
-        const credential = EmailAuthProvider.credential(superAdminEmail, superAdminPassword);
+        const credential = EmailAuthProvider.credential(currentUser.email, superAdminPassword);
         await reauthenticateWithCredential(currentUser, credential);
         
-        // Step 2: Generate temporary password
+        // Step 2: Check if email already exists in Firestore
+        const existingAdminQuery = query(
+            collection(db, 'admins'), 
+            where('email', '==', email)
+        );
+        const existingAdminSnapshot = await getDocs(existingAdminQuery);
+        
+        if (!existingAdminSnapshot.empty) {
+            showAlert('An admin with this email already exists.', 'error');
+            return;
+        }
+        
+        // Step 3: Generate temporary password
         const tempPassword = generateTempPassword();
         
-        // Step 3: Create new user account
-        const userCredential = await createUserWithEmailAndPassword(auth, email, tempPassword);
-        const newUser = userCredential.user;
+        // Step 4: Create admin document in Firestore using email as document ID
+        const emailDocId = email.replace(/[.#$[\]]/g, '_'); // Replace invalid Firestore ID characters
         
-        // Step 4: Create admin document in Firestore
-        await setDoc(doc(db, 'admins', newUser.uid), {
+        await setDoc(doc(db, 'admins', emailDocId), {
             adminId: adminId,
             name: name,
             email: email,
@@ -250,27 +273,23 @@ async function addAdmin() {
             isActive: true,
             createdAt: serverTimestamp(),
             createdBy: currentUser.uid,
-            tempPassword: tempPassword, // Store temp password for reference
-            firstLogin: true
+            tempPassword: tempPassword,
+            firstLogin: true,
+            authAccountCreated: false // Flag to track if Firebase Auth account exists
         });
         
         // Step 5: Log the action
         await addDoc(collection(db, 'admin_logs'), {
-            action: 'create_admin',
-            adminId: newUser.uid,
+            action: 'create_admin_record',
             adminEmail: email,
             performedBy: currentUser.uid,
             performedByEmail: currentUser.email,
-            timestamp: serverTimestamp()
+            timestamp: serverTimestamp(),
+            note: 'Admin record created, Firebase Auth account will be created on first login'
         });
         
-        // Step 6: Sign out the new user and sign back in as super admin
-        await signOut(auth);
-        await signInWithEmailAndPassword(auth, superAdminEmail, superAdminPassword);
-        
-        // Step 7: Send email with credentials
+        // Step 6: Send email with credentials
         try {
-            // Initialize EmailJS if not already done
             if (typeof emailjs !== 'undefined') {
                 await emailjs.send(
                     EMAILJS_SERVICE_ID,
@@ -292,7 +311,7 @@ async function addAdmin() {
             showAlert(`Admin ${name} added successfully, but email failed to send. Temporary password: ${tempPassword}`, 'warning');
         }
         
-        // Step 8: Close modal and reload
+        // Step 7: Close modal and reload
         closeAddModal();
         if (!showAlert.toString().includes('Temporary password')) {
             showAlert(`Admin ${name} added successfully. Login credentials sent via email.`, 'success');
@@ -305,15 +324,6 @@ async function addAdmin() {
         let errorMessage = 'Error adding admin: ';
         
         switch (error.code) {
-            case 'auth/email-already-in-use':
-                errorMessage += 'Email is already registered.';
-                break;
-            case 'auth/invalid-email':
-                errorMessage += 'Invalid email address.';
-                break;
-            case 'auth/weak-password':
-                errorMessage += 'Password is too weak.';
-                break;
             case 'auth/wrong-password':
                 errorMessage += 'Incorrect Super Admin password.';
                 break;
@@ -322,16 +332,6 @@ async function addAdmin() {
         }
         
         showAlert(errorMessage, 'error');
-        
-        // Try to sign back in as super admin if we got signed out
-        if (!auth.currentUser) {
-            try {
-                await signInWithEmailAndPassword(auth, superAdminEmail, superAdminPassword);
-            } catch (signInError) {
-                console.error('Error signing back in:', signInError);
-                window.location.href = '../index.html';
-            }
-        }
         
     } finally {
         addButton.disabled = false;
@@ -631,6 +631,90 @@ function closeAlert() {
         alertElement.classList.remove('hiding');
     }, 300);
 }
+
+// Function to delete pending admin (before first login)
+async function confirmDeletePendingAdmin(adminId) {
+    currentAdminId = adminId;
+    currentAction = 'delete_pending';
+    
+    document.getElementById('confirmation-title').textContent = 'Delete Pending Admin';
+    document.getElementById('confirmation-message').textContent = 
+        'Are you sure you want to delete this pending admin? This action cannot be undone.';
+    document.getElementById('confirmation-password').value = '';
+    
+    const confirmButton = document.getElementById('confirm-action-btn');
+    confirmButton.className = 'btn btn-danger';
+    confirmButton.textContent = 'Delete Admin';
+    confirmButton.onclick = deletePendingAdmin;
+    
+    confirmationModal.style.display = 'block';
+}
+
+// Delete pending admin function
+async function deletePendingAdmin() {
+    if (!currentAdminId) return;
+    
+    const superAdminPassword = document.getElementById('confirmation-password').value;
+    
+    if (!superAdminPassword) {
+        showAlert('Please enter your password for verification.', 'error');
+        return;
+    }
+    
+    const confirmButton = document.getElementById('confirm-action-btn');
+    confirmButton.disabled = true;
+    confirmButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+    
+    try {
+        const currentUser = auth.currentUser;
+        const credential = EmailAuthProvider.credential(
+            currentUser.email,
+            superAdminPassword
+        );
+        
+        await reauthenticateWithCredential(currentUser, credential);
+        
+        // Get admin data to log
+        const adminDocRef = doc(db, 'admins', currentAdminId);
+        const adminDoc = await getDoc(adminDocRef);
+        const adminData = adminDoc.data();
+        
+        // Delete the pending admin document
+        await deleteDoc(adminDocRef);
+        
+        // Log the action
+        await addDoc(collection(db, 'admin_logs'), {
+            action: 'delete_pending_admin',
+            adminEmail: adminData.email,
+            performedBy: currentUser.uid,
+            performedByEmail: currentUser.email,
+            timestamp: serverTimestamp()
+        });
+        
+        // Close modal and reload admins
+        closeConfirmationModal();
+        showAlert('Pending admin deleted successfully.', 'success');
+        loadAdmins();
+        
+    } catch (error) {
+        console.error('Error deleting pending admin:', error);
+        
+        let errorMessage = 'Error deleting pending admin.';
+        
+        if (error.code === 'auth/wrong-password') {
+            errorMessage = 'Incorrect Super Admin password.';
+        }
+        
+        showAlert(errorMessage, 'error');
+    } finally {
+        // Re-enable button
+        confirmButton.disabled = false;
+        confirmButton.textContent = 'Delete Admin';
+    }
+}
+
+// Add the new function to global scope
+window.confirmDeletePendingAdmin = confirmDeletePendingAdmin;
 
 // Make functions globally available
 window.openAddModal = openAddModal;
