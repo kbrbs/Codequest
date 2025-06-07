@@ -1,4 +1,25 @@
 // Class Management JavaScript
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.2.0/firebase-app.js"
+import {
+  getAuth,
+  onAuthStateChanged,
+  EmailAuthProvider,
+  reauthenticateWithCredential,  // Add this import
+} from "https://www.gstatic.com/firebasejs/9.2.0/firebase-auth.js"
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  addDoc,
+  updateDoc,
+  orderBy,
+  serverTimestamp,
+  query,
+  where,
+  writeBatch,
+} from "https://www.gstatic.com/firebasejs/9.2.0/firebase-firestore.js"
 
 // Firebase configuration
 const firebaseConfig = {
@@ -10,14 +31,10 @@ const firebaseConfig = {
     appId: "1:5857953993:web:79cc6a52b3baf9b7b52518"
 };
 
-// Initialize Firebase if not already initialized
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
-
-// References to Firebase services
-const auth = firebase.auth();
-const db = firebase.firestore();
+// Initialize Firebase
+const app = initializeApp(firebaseConfig)
+const auth = getAuth(app)
+const db = getFirestore(app)
 
 // DOM Elements
 const loadingElement = document.getElementById('loading');
@@ -40,17 +57,22 @@ const alertElement = document.getElementById('alert');
 // Current class being edited or deleted
 let currentClassId = null;
 let classes = [];
+let currentUser = null;
+let adminProfile = null;
 
 // Check if user is authenticated
 document.addEventListener('DOMContentLoaded', () => {
-    auth.onAuthStateChanged(user => {
+    auth.onAuthStateChanged(async user => {
         if (user) {
+            currentUser = user;
+            // Load admin profile first
+            await loadAdminProfile();
             // User is signed in, load classes
             loadClasses();
             loadStats();
         } else {
             // User is not signed in, redirect to login page
-            window.location.href = 'login.html';
+            window.location.href = '../index.html';
         }
     });
 
@@ -58,13 +80,53 @@ document.addEventListener('DOMContentLoaded', () => {
     searchInput.addEventListener('input', filterClasses);
 });
 
-// Load classes from Firestore
+// Load admin profile from Firestore
+async function loadAdminProfile() {
+    try {
+        if (!currentUser) return;
+        
+        // Try to get admin profile from 'admins' collection
+        const adminDoc = await getDoc(doc(db, 'admins', currentUser.uid));
+        
+        if (adminDoc.exists()) {
+            adminProfile = adminDoc.data();
+        } else {
+            // If no admin profile, try 'users' collection
+            const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+            if (userDoc.exists()) {
+                adminProfile = userDoc.data();
+            } else {
+                // Create a basic profile with email
+                adminProfile = {
+                    name: currentUser.displayName || currentUser.email.split('@')[0],
+                    email: currentUser.email
+                };
+            }
+        }
+    } catch (error) {
+        console.error('Error loading admin profile:', error);
+        // Fallback profile
+        adminProfile = {
+            name: currentUser.displayName || currentUser.email.split('@')[0],
+            email: currentUser.email
+        };
+    }
+}
+
+// Load classes from Firestore (only for current admin)
 async function loadClasses() {
     try {
         loadingElement.style.display = 'block';
         classesTable.style.display = 'none';
         
-        const classesSnapshot = await db.collection('classes').orderBy('createdAt', 'desc').get();
+        // Query classes created by current admin only
+        // Note: We'll sort in memory to avoid needing a composite index
+        const classesQuery = query(
+            collection(db, 'classes'),
+            where('createdBy', '==', currentUser.uid)
+        );
+        
+        const classesSnapshot = await getDocs(classesQuery);
         
         // Clear existing rows
         classesTbody.innerHTML = '';
@@ -73,13 +135,13 @@ async function loadClasses() {
         if (classesSnapshot.empty) {
             // No classes found
             const noDataRow = document.createElement('tr');
-            noDataRow.innerHTML = '<td colspan="6" style="text-align: center;">No classes found</td>';
+            noDataRow.innerHTML = '<td colspan="5" style="text-align: center;">No classes found</td>';
             classesTbody.appendChild(noDataRow);
         } else {
             // Add each class to the table
-            classesSnapshot.forEach(doc => {
-                const classData = doc.data();
-                classData.id = doc.id;
+            classesSnapshot.forEach(docSnapshot => {
+                const classData = docSnapshot.data();
+                classData.id = docSnapshot.id;
                 classes.push(classData);
                 
                 const classRow = createClassRow(classData);
@@ -98,20 +160,25 @@ async function loadClasses() {
     }
 }
 
-// Load statistics
+// Load statistics (only for current admin's classes)
 async function loadStats() {
     try {
-        // Get total classes
-        const classesSnapshot = await db.collection('classes').get();
+        // Get total classes for current admin
+        const classesQuery = query(
+            collection(db, 'classes'),
+            where('createdBy', '==', currentUser.uid)
+        );
+        const classesSnapshot = await getDocs(classesQuery);
         totalClassesElement.textContent = classesSnapshot.size;
         
-        // Get active classes (classes with at least one student)
+        // Get active classes and total students
         let activeClasses = 0;
         let totalStudents = 0;
         
         // For each class, check if it has students
-        for (const doc of classesSnapshot.docs) {
-            const studentsSnapshot = await db.collection('classes').doc(doc.id).collection('students').get();
+        for (const docSnapshot of classesSnapshot.docs) {
+            const studentsQuery = query(collection(db, 'classes', docSnapshot.id, 'students'));
+            const studentsSnapshot = await getDocs(studentsQuery);
             const studentCount = studentsSnapshot.size;
             
             totalStudents += studentCount;
@@ -140,7 +207,6 @@ function createClassRow(classData) {
     
     row.innerHTML = `
         <td>${classData.className}</td>
-        <td>${classData.instructorName}</td>
         <td><span class="class-code">${classData.classCode}</span></td>
         <td>${studentCount} <span class="badge badge-primary">Students</span></td>
         <td>${createdAt}</td>
@@ -208,8 +274,14 @@ function openAddClassModal() {
     
     // Clear form fields
     document.getElementById('class-name').value = '';
-    document.getElementById('instructor-name').value = '';
     document.getElementById('admin-password').value = '';
+    
+    // Auto-fill instructor name from admin profile
+    if (adminProfile && adminProfile.name) {
+        document.getElementById('instructor-name').value = adminProfile.name;
+    } else {
+        document.getElementById('instructor-name').value = '';
+    }
     
     // Show modal
     addClassModal.style.display = 'block';
@@ -241,18 +313,19 @@ async function addClass() {
     
     try {
         // Re-authenticate current user to verify password
-        const currentUser = auth.currentUser;
-        const credential = firebase.auth.EmailAuthProvider.credential(
+        const credential = EmailAuthProvider.credential(
             currentUser.email,
             adminPassword
         );
         
-        await currentUser.reauthenticateWithCredential(credential);
+        await reauthenticateWithCredential(currentUser, credential);
         
         // Check if class code already exists
-        const codeCheck = await db.collection('classes')
-            .where('classCode', '==', classCode)
-            .get();
+        const codeCheckQuery = query(
+            collection(db, 'classes'),
+            where('classCode', '==', classCode)
+        );
+        const codeCheck = await getDocs(codeCheckQuery);
         
         if (!codeCheck.empty) {
             // Generate a new code if this one already exists
@@ -267,12 +340,13 @@ async function addClass() {
         }
         
         // Add class to Firestore
-        await db.collection('classes').add({
+        await addDoc(collection(db, 'classes'), {
             className: className,
             instructorName: instructorName,
             classCode: classCode,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            createdAt: serverTimestamp(),
             createdBy: currentUser.uid,
+            createdByEmail: currentUser.email,
             studentCount: 0,
             isActive: true
         });
@@ -306,7 +380,7 @@ async function openEditClassModal(classId) {
         currentClassId = classId;
         
         // Get class data
-        const classDoc = await db.collection('classes').doc(classId).get();
+        const classDoc = await getDoc(doc(db, 'classes', classId));
         
         if (classDoc.exists) {
             const classData = classDoc.data();
@@ -357,19 +431,18 @@ async function updateClass() {
     
     try {
         // Re-authenticate current user to verify password
-        const currentUser = auth.currentUser;
-        const credential = firebase.auth.EmailAuthProvider.credential(
+        const credential = EmailAuthProvider.credential(
             currentUser.email,
             adminPassword
         );
         
-        await currentUser.reauthenticateWithCredential(credential);
+        await reauthenticateWithCredential(currentUser, credential);
         
         // Update class in Firestore
-        await db.collection('classes').doc(currentClassId).update({
+        await updateDoc(doc(db, 'classes', currentClassId), {
             className: className,
             instructorName: instructorName,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: serverTimestamp(),
             updatedBy: currentUser.uid
         });
         
@@ -405,7 +478,7 @@ async function openViewStudentsModal(classId) {
         document.getElementById('students-container').style.display = 'none';
         
         // Get class data
-        const classDoc = await db.collection('classes').doc(classId).get();
+        const classDoc = await getDoc(doc(db, 'classes', classId));
         
         if (classDoc.exists) {
             const classData = classDoc.data();
@@ -415,7 +488,8 @@ async function openViewStudentsModal(classId) {
             document.getElementById('view-class-code').textContent = classData.classCode;
             
             // Get students
-            const studentsSnapshot = await db.collection('classes').doc(classId).collection('students').get();
+            const studentsQuery = query(collection(db, 'classes', classId, 'students'));
+            const studentsSnapshot = await getDocs(studentsQuery);
             const studentList = document.getElementById('student-list');
             
             // Clear existing students
@@ -429,8 +503,8 @@ async function openViewStudentsModal(classId) {
                 studentList.innerHTML = '<li class="no-students">No students enrolled in this class yet.</li>';
             } else {
                 // Add each student to the list
-                studentsSnapshot.forEach(doc => {
-                    const student = doc.data();
+                studentsSnapshot.forEach(docSnapshot => {
+                    const student = docSnapshot.data();
                     const studentItem = createStudentItem(student);
                     studentList.appendChild(studentItem);
                 });
@@ -496,7 +570,7 @@ async function openDeleteModal(classId) {
         currentClassId = classId;
         
         // Get class data
-        const classDoc = await db.collection('classes').doc(classId).get();
+        const classDoc = await getDoc(doc(db, 'classes', classId));
         
         if (classDoc.exists) {
             const classData = classDoc.data();
@@ -540,41 +614,41 @@ async function deleteClass() {
     
     try {
         // Re-authenticate current user to verify password
-        const currentUser = auth.currentUser;
-        const credential = firebase.auth.EmailAuthProvider.credential(
+        const credential = EmailAuthProvider.credential(
             currentUser.email,
             adminPassword
         );
         
-        await currentUser.reauthenticateWithCredential(credential);
+        await reauthenticateWithCredential(currentUser, credential);
         
         // Get class data for logging
-        const classDoc = await db.collection('classes').doc(currentClassId).get();
+        const classDoc = await getDoc(doc(db, 'classes', currentClassId));
         const classData = classDoc.data();
         
         // Delete all students in the class
-        const studentsSnapshot = await db.collection('classes').doc(currentClassId).collection('students').get();
+        const studentsQuery = query(collection(db, 'classes', currentClassId, 'students'));
+        const studentsSnapshot = await getDocs(studentsQuery);
         
         // Batch delete students
-        const batch = db.batch();
-        studentsSnapshot.forEach(doc => {
-            batch.delete(doc.ref);
+        const batchDelete = writeBatch(db);
+        studentsSnapshot.forEach(docSnapshot => {
+            batchDelete.delete(docSnapshot.ref);
         });
         
         // Delete the class
-        batch.delete(db.collection('classes').doc(currentClassId));
+        batchDelete.delete(doc(db, 'classes', currentClassId));
         
         // Commit the batch
-        await batch.commit();
+        await batchDelete.commit();
         
         // Log the action
-        await db.collection('activity_logs').add({
+        await addDoc(collection(db, 'activity_logs'), {
             action: 'delete_class',
             className: classData.className,
             classCode: classData.classCode,
             performedBy: currentUser.uid,
             performedByEmail: currentUser.email,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            timestamp: serverTimestamp()
         });
         
         // Close modal and reload classes
@@ -626,7 +700,7 @@ function closeAlert() {
     }, 300);
 }
 
-// Make functions globally available
+// Make functions globally available (must be at the end of the file)
 window.openAddClassModal = openAddClassModal;
 window.closeAddClassModal = closeAddClassModal;
 window.addClass = addClass;
@@ -640,3 +714,29 @@ window.openDeleteModal = openDeleteModal;
 window.closeDeleteModal = closeDeleteModal;
 window.deleteClass = deleteClass;
 window.closeAlert = closeAlert;
+
+// Also expose these functions immediately for HTML onclick handlers
+if (typeof window !== 'undefined') {
+    // Ensure DOM is loaded before attaching functions
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', attachGlobalFunctions);
+    } else {
+        attachGlobalFunctions();
+    }
+}
+
+function attachGlobalFunctions() {
+    window.openAddClassModal = openAddClassModal;
+    window.closeAddClassModal = closeAddClassModal;
+    window.addClass = addClass;
+    window.openEditClassModal = openEditClassModal;
+    window.closeEditClassModal = closeEditClassModal;
+    window.updateClass = updateClass;
+    window.openViewStudentsModal = openViewStudentsModal;
+    window.closeViewStudentsModal = closeViewStudentsModal;
+    window.copyClassCode = copyClassCode;
+    window.openDeleteModal = openDeleteModal;
+    window.closeDeleteModal = closeDeleteModal;
+    window.deleteClass = deleteClass;
+    window.closeAlert = closeAlert;
+}

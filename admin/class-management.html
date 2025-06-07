@@ -219,7 +219,7 @@
         .action-buttons {
             display: flex;
             gap: 5px;
-            justify-content: flex-end;
+            justify-content: left;
         }
 
         .btn-icon {
@@ -642,7 +642,7 @@
                         <thead>
                             <tr>
                                 <th>Class Name</th>
-                                <th>Instructor</th>
+                                <!-- <th>Instructor</th> -->
                                 <th>Class Code</th>
                                 <th>Students</th>
                                 <th>Created Date</th>
@@ -673,7 +673,7 @@
                     </div>
                     <div class="form-group">
                         <label for="instructor-name">Instructor Name</label>
-                        <input type="text" id="instructor-name" class="form-control" placeholder="e.g. John Doe" required>
+                        <input type="text" id="instructor-name" class="form-control" readonly>
                     </div>
                     <div class="form-group">
                         <label for="class-code">Class Code</label>
@@ -710,7 +710,7 @@
                     </div>
                     <div class="form-group">
                         <label for="edit-instructor-name">Instructor Name</label>
-                        <input type="text" id="edit-instructor-name" class="form-control" required>
+                        <input type="text" id="edit-instructor-name" class="form-control" readonly>
                     </div>
                     <div class="form-group">
                         <label for="edit-class-code">Class Code</label>
