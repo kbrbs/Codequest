@@ -1,8 +1,9 @@
 import { 
     EmailAuthProvider,
     createUserWithEmailAndPassword,
-    sendPasswordResetEmail,
-    reauthenticateWithCredential
+    signInWithEmailAndPassword,
+    reauthenticateWithCredential,
+    signOut
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 import { 
     collection, 
@@ -12,9 +13,16 @@ import {
     where,
     getDocs,
     serverTimestamp,
-    setDoc 
+    setDoc,
+    updateDoc,
+    addDoc
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import { auth, db } from './firebase-config.js';
+
+// Initialize EmailJS - make sure this matches your EmailJS account
+const EMAILJS_SERVICE_ID = "service_fxw9h0p";
+const EMAILJS_TEMPLATE_ID = "template_dqnybw8";
+const EMAILJS_PUBLIC_KEY = "prrfmOdZMuRUcna22";
 
 // DOM Elements
 const loadingElement = document.getElementById('loading');
@@ -163,10 +171,11 @@ async function openEditModal(adminId) {
     try {
         currentAdminId = adminId;
         
-        // Get admin data
-        const adminDoc = await db.collection('admins').doc(adminId).get();
+        // Get admin data using v9 syntax
+        const adminDocRef = doc(db, 'admins', adminId);
+        const adminDoc = await getDoc(adminDocRef);
         
-        if (adminDoc.exists) {
+        if (adminDoc.exists()) {
             const admin = adminDoc.data();
             
             // Fill form fields
@@ -193,81 +202,138 @@ function closeEditModal() {
     currentAdminId = null;
 }
 
-// Add new admin
+// Add admin function - FIXED VERSION
 async function addAdmin() {
-    // Get form values
     const adminId = document.getElementById('admin-id').value;
     const name = document.getElementById('admin-name').value.trim();
     const email = document.getElementById('admin-email').value.trim();
     const superAdminPassword = document.getElementById('super-admin-password').value;
     
-    // Validate form
     if (!name || !email || !superAdminPassword) {
         showAlert('Please fill in all fields.', 'error');
         return;
     }
     
-    // Disable button to prevent multiple submissions
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        showAlert('Please enter a valid email address.', 'error');
+        return;
+    }
+    
     const addButton = document.getElementById('add-admin-btn');
     addButton.disabled = true;
     addButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
     
+    // Store current user info
+    const currentUser = auth.currentUser;
+    const superAdminEmail = currentUser.email;
+    
     try {
-        // Store current Super Admin user
-        const superAdmin = auth.currentUser;
+        // Step 1: Re-authenticate super admin
+        const credential = EmailAuthProvider.credential(superAdminEmail, superAdminPassword);
+        await reauthenticateWithCredential(currentUser, credential);
         
-        // Re-authenticate current user to verify password
-        const credential = EmailAuthProvider.credential(
-            superAdmin.email,
-            superAdminPassword
-        );
-        
-        await reauthenticateWithCredential(superAdmin, credential);
-        
-        // Create new user account for admin with a temporary password
+        // Step 2: Generate temporary password
         const tempPassword = generateTempPassword();
-        const { user: newAdmin } = await createUserWithEmailAndPassword(auth, email, tempPassword);
         
-        // Create the document reference
-        const adminDocRef = doc(db, 'admins', newAdmin.uid);
+        // Step 3: Create new user account
+        const userCredential = await createUserWithEmailAndPassword(auth, email, tempPassword);
+        const newUser = userCredential.user;
         
-        // Set admin data in Firestore
-        await setDoc(adminDocRef, {
+        // Step 4: Create admin document in Firestore
+        await setDoc(doc(db, 'admins', newUser.uid), {
             adminId: adminId,
             name: name,
             email: email,
             role: 'Admin',
             isActive: true,
             createdAt: serverTimestamp(),
-            createdBy: superAdmin.uid
+            createdBy: currentUser.uid,
+            tempPassword: tempPassword, // Store temp password for reference
+            firstLogin: true
         });
         
-        // Send password reset email to new admin
-        await sendPasswordResetEmail(auth, email);
+        // Step 5: Log the action
+        await addDoc(collection(db, 'admin_logs'), {
+            action: 'create_admin',
+            adminId: newUser.uid,
+            adminEmail: email,
+            performedBy: currentUser.uid,
+            performedByEmail: currentUser.email,
+            timestamp: serverTimestamp()
+        });
         
-        // Close modal and reload admins
+        // Step 6: Sign out the new user and sign back in as super admin
+        await signOut(auth);
+        await signInWithEmailAndPassword(auth, superAdminEmail, superAdminPassword);
+        
+        // Step 7: Send email with credentials
+        try {
+            // Initialize EmailJS if not already done
+            if (typeof emailjs !== 'undefined') {
+                await emailjs.send(
+                    EMAILJS_SERVICE_ID,
+                    EMAILJS_TEMPLATE_ID,
+                    {
+                        email: email,
+                        name: name,
+                        passcode: tempPassword
+                    },
+                    EMAILJS_PUBLIC_KEY
+                );
+                console.log('Email sent successfully');
+            } else {
+                console.warn('EmailJS not loaded, skipping email');
+                showAlert(`Admin ${name} added successfully. Temporary password: ${tempPassword}`, 'success');
+            }
+        } catch (emailError) {
+            console.error('Error sending email:', emailError);
+            showAlert(`Admin ${name} added successfully, but email failed to send. Temporary password: ${tempPassword}`, 'warning');
+        }
+        
+        // Step 8: Close modal and reload
         closeAddModal();
-        showAlert(`Admin ${name} added successfully. Password reset email sent.`, 'success');
-        // loadAdmins();
+        if (!showAlert.toString().includes('Temporary password')) {
+            showAlert(`Admin ${name} added successfully. Login credentials sent via email.`, 'success');
+        }
+        loadAdmins();
         
     } catch (error) {
         console.error('Error adding admin:', error);
         
-        let errorMessage = 'Error adding admin.';
+        let errorMessage = 'Error adding admin: ';
         
-        if (error.code === 'auth/wrong-password') {
-            errorMessage = 'Incorrect Super Admin password.';
-        } else if (error.code === 'auth/email-already-in-use') {
-            errorMessage = 'Email is already in use.';
-        } else if (error.code === 'auth/invalid-email') {
-            errorMessage = 'Invalid email format.';
-        } else if (error.code === 'auth/weak-password') {
-            errorMessage = 'Password is too weak.';
+        switch (error.code) {
+            case 'auth/email-already-in-use':
+                errorMessage += 'Email is already registered.';
+                break;
+            case 'auth/invalid-email':
+                errorMessage += 'Invalid email address.';
+                break;
+            case 'auth/weak-password':
+                errorMessage += 'Password is too weak.';
+                break;
+            case 'auth/wrong-password':
+                errorMessage += 'Incorrect Super Admin password.';
+                break;
+            default:
+                errorMessage += error.message;
         }
         
         showAlert(errorMessage, 'error');
+        
+        // Try to sign back in as super admin if we got signed out
+        if (!auth.currentUser) {
+            try {
+                await signInWithEmailAndPassword(auth, superAdminEmail, superAdminPassword);
+            } catch (signInError) {
+                console.error('Error signing back in:', signInError);
+                window.location.href = '../index.html';
+            }
+        }
+        
     } finally {
-        // Re-enable button
         addButton.disabled = false;
         addButton.innerHTML = 'Add Admin';
     }
@@ -301,7 +367,8 @@ async function updateAdmin() {
         
         await reauthenticateWithCredential(currentUser, credential);
         
-        await db.collection('admins').doc(currentAdminId).update({
+        const adminDocRef = doc(db, 'admins', currentAdminId);
+        await updateDoc(adminDocRef, {
             name: name,
             updatedAt: serverTimestamp(),
             updatedBy: currentUser.uid
@@ -390,18 +457,19 @@ async function blockAdmin() {
         await reauthenticateWithCredential(currentUser, credential);
         
         // Get admin data to log
-        const adminDoc = await db.collection('admins').doc(currentAdminId).get();
+        const adminDocRef = doc(db, 'admins', currentAdminId);
+        const adminDoc = await getDoc(adminDocRef);
         const adminData = adminDoc.data();
         
         // Update admin status in Firestore
-        await db.collection('admins').doc(currentAdminId).update({
+        await updateDoc(adminDocRef, {
             isActive: false,
             blockedAt: serverTimestamp(),
             blockedBy: currentUser.uid
         });
         
         // Log the action
-        await db.collection('admin_logs').add({
+        await addDoc(collection(db, 'admin_logs'), {
             action: 'block_admin',
             adminId: currentAdminId,
             adminEmail: adminData.email,
@@ -457,18 +525,19 @@ async function unblockAdmin() {
         await reauthenticateWithCredential(currentUser, credential);
         
         // Get admin data to log
-        const adminDoc = await db.collection('admins').doc(currentAdminId).get();
+        const adminDocRef = doc(db, 'admins', currentAdminId);
+        const adminDoc = await getDoc(adminDocRef);
         const adminData = adminDoc.data();
         
         // Update admin status in Firestore
-        await db.collection('admins').doc(currentAdminId).update({
+        await updateDoc(adminDocRef, {
             isActive: true,
             unblockedAt: serverTimestamp(),
             unblockedBy: currentUser.uid
         });
         
         // Log the action
-        await db.collection('admin_logs').add({
+        await addDoc(collection(db, 'admin_logs'), {
             action: 'unblock_admin',
             adminId: currentAdminId,
             adminEmail: adminData.email,
@@ -506,17 +575,35 @@ function closeConfirmationModal() {
     currentAction = null;
 }
 
-// Generate a temporary password
+// Generate secure temporary password
 function generateTempPassword() {
-    // Generate a random 12-character password
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    // Ensure password contains:
+    // - At least 6 characters
+    // - At least one uppercase letter
+    // - At least one lowercase letter
+    // - At least one number
+    // - At least one special character
+    const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
+    const special = '!@#$%^&*';
+    const allChars = uppercase + lowercase + numbers + special;
+    
     let password = '';
     
-    for (let i = 0; i < 12; i++) {
-        password += chars.charAt(Math.floor(Math.random() * chars.length));
+    // Ensure one character from each required set
+    password += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
+    password += lowercase.charAt(Math.floor(Math.random() * lowercase.length));
+    password += numbers.charAt(Math.floor(Math.random() * numbers.length));
+    password += special.charAt(Math.floor(Math.random() * special.length));
+    
+    // Fill the rest with random characters (8 more chars for total length of 12)
+    for (let i = 0; i < 8; i++) {
+        password += allChars.charAt(Math.floor(Math.random() * allChars.length));
     }
     
-    return password;
+    // Shuffle the password string
+    return password.split('').sort(() => Math.random() - 0.5).join('');
 }
 
 // Show alert message
