@@ -53,6 +53,7 @@ const passwordErrorMessage = document.getElementById("password-error-message")
 
 // Global variable to store first login data
 let firstLoginData = null
+let isDuringFirstLoginSetup = false;
 
 // Login form submission
 loginForm.addEventListener("submit", async (e) => {
@@ -305,6 +306,7 @@ passwordChangeForm.addEventListener("submit", async (e) => {
 // Complete first login setup - CREATE auth account with new password
 async function completeFirstLoginSetup(newPassword) {
   try {
+    isDuringFirstLoginSetup = true;
     const { email, adminData, pendingAdminDoc } = firstLoginData
 
     console.log("Creating Firebase Auth account with new password")
@@ -363,6 +365,7 @@ async function completeFirstLoginSetup(newPassword) {
       
       // Redirect to appropriate dashboard
       await checkUserRole(newUser.uid);
+      isDuringFirstLoginSetup = false;
 
       console.log("First login setup completed successfully")
 
@@ -576,7 +579,7 @@ function logLoginActivity(userId, email, role) {
 
 // Check if user is already logged in
 auth.onAuthStateChanged((user) => {
-  if (user) {
+  if (user && !isDuringFirstLoginSetup) {
     // User is already signed in, check role and redirect
     checkUserRole(user.uid)
   }
