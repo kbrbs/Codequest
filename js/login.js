@@ -316,25 +316,41 @@ async function completeFirstLoginSetup(newPassword) {
     console.log("Firebase Auth account created successfully:", newUser.uid)
 
     try {
-      // Step 2: Create new document with UID as ID (without tempPassword)
-      const newAdminData = {
-        ...adminData,
-        firstLogin: false, // Mark as completed
-        authAccountCreated: true,
-        authAccountCreatedAt: serverTimestamp(),
-        uid: newUser.uid,
-        passwordChangedAt: serverTimestamp(),
+      // Step 1: Sanitize email-based ID
+      let emailDocId = email.replace(/[.#$[\]]/g, "_");
+      const oldDocRef = doc(db, "admins", emailDocId);
+      const newDocRef = doc(db, "admins", newUser.uid);
+
+      // Step 2: Get data from old document
+      const snapshot = await getDoc(oldDocRef);
+
+      if (snapshot.exists()) {
+        const adminData = snapshot.data();
+
+        // Step 3: Prepare new admin data
+        const newAdminData = {
+          ...adminData,
+          firstLogin: false,
+          authAccountCreated: true,
+          authAccountCreatedAt: serverTimestamp(),
+          uid: newUser.uid,
+          passwordChangedAt: serverTimestamp()
+        };
+
+        // Remove temporary password
+        delete newAdminData.tempPassword;
+
+        // Step 4: Set data to new document (UID-based)
+        await setDoc(newDocRef, newAdminData, { merge: true });
+
+        // Step 5: Delete old document
+        await deleteDoc(oldDocRef);
+
+        console.log("Admin document successfully renamed to UID-based ID without tempPassword.");
+      } else {
+        console.error("No document found for the given email ID.");
       }
-
-      // Remove temporary password from the data
-      delete newAdminData.tempPassword
-
-      await setDoc(doc(db, "admins", newUser.uid), newAdminData)
       console.log("Admin document migrated to UID-based ID without tempPassword")
-
-      // Step 3: Delete the old email-based document
-      await deleteDoc(pendingAdminDoc.ref)
-      console.log("Old email-based document deleted")
 
       // Step 4: Log the successful account creation
       await addDoc(collection(db, "admin_logs"), {
@@ -344,6 +360,9 @@ async function completeFirstLoginSetup(newPassword) {
         timestamp: serverTimestamp(),
         note: "Firebase Auth account created with new password and document migrated to UID-based ID",
       })
+      
+      // Redirect to appropriate dashboard
+      await checkUserRole(newUser.uid);
 
       console.log("First login setup completed successfully")
 
@@ -353,14 +372,10 @@ async function completeFirstLoginSetup(newPassword) {
       // Show success message
       alert("Account created successfully! Redirecting to dashboard...")
 
-      // Redirect to appropriate dashboard
-      setTimeout(() => {
-        checkUserRole(newUser.uid)
-      }, 1000)
 
     } catch (firestoreError) {
       console.error("Error setting up Firestore data:", firestoreError)
-      
+
       // If Firestore operations failed, clean up the auth account
       try {
         await newUser.delete()
@@ -368,7 +383,7 @@ async function completeFirstLoginSetup(newPassword) {
       } catch (cleanupError) {
         console.error("Error cleaning up auth account:", cleanupError)
       }
-      
+
       throw new Error("Failed to complete account setup. Please try again.")
     }
 
@@ -479,12 +494,15 @@ forgotPasswordLink.addEventListener("click", async (e) => {
 // Check user role and redirect accordingly
 async function checkUserRole(userId) {
   try {
+      console.log("check role user ID:", userId)
     // Check if the user is in the admins collection
-    const adminDoc = await getDoc(doc(db, "admins", userId))
+    
+    let adminRef = doc(db, "admins", userId)
+    let adminDoc = await getDoc(adminRef)
 
     if (adminDoc.exists) {
       const adminData = adminDoc.data()
-      console.log("Admin data:", adminData)
+      console.log("Admin data:", adminDoc.data())
 
       // Check if admin account is active
       if (!adminData.isActive) {
