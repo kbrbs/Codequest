@@ -8,6 +8,184 @@
     <link rel="stylesheet" href="css/login.css">
     <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Roboto:wght@400;700&display=swap"
         rel="stylesheet">
+
+    <style>
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .modal-header h2 {
+            color: #333;
+            margin-bottom: 0.5rem;
+            font-size: 1.5rem;
+        }
+
+        .modal-header p {
+            color: #666;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .password-change-form .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .password-input-container {
+            position: relative;
+        }
+
+        .password-input-container input {
+            width: 100%;
+            padding: 12px 45px 12px 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .password-input-container input:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+
+        .toggle-password {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            padding: 5px;
+            transition: color 0.3s ease;
+        }
+
+        .toggle-password:hover {
+            color: #007bff;
+        }
+
+        .password-requirements {
+            margin-top: 0.5rem;
+        }
+
+        .password-requirements small {
+            color: #666;
+            font-size: 0.8rem;
+        }
+
+        .modal-actions {
+            margin-top: 2rem;
+        }
+
+        .change-password-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .change-password-btn:hover {
+            background: linear-gradient(135deg, #0056b3, #004085);
+            transform: translateY(-1px);
+        }
+
+        .change-password-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Password strength indicator */
+        .password-strength {
+            margin-top: 0.5rem;
+            height: 4px;
+            background: #e1e5e9;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .password-strength-bar {
+            height: 100%;
+            transition: all 0.3s ease;
+            border-radius: 2px;
+        }
+
+        .password-strength.weak .password-strength-bar {
+            width: 33%;
+            background: #dc3545;
+        }
+
+        .password-strength.medium .password-strength-bar {
+            width: 66%;
+            background: #ffc107;
+        }
+
+        .password-strength.strong .password-strength-bar {
+            width: 100%;
+            background: #28a745;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .modal-content {
+                margin: 1rem;
+                padding: 1.5rem;
+            }
+
+            .modal-header h2 {
+                font-size: 1.3rem;
+            }
+        }
+    </style>
 </head>
 
 <body>
@@ -35,11 +213,51 @@
         </div>
     </div>
 
+    <div id="password-change-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Change Your Password</h2>
+                <p>For security reasons, you must change your temporary password before accessing the dashboard.</p>
+            </div>
+
+            <form id="password-change-form" class="password-change-form">
+                <div class="form-group">
+                    <label for="new-password">New Password</label>
+                    <div class="password-input-container">
+                        <input type="password" id="new-password" required minlength="8">
+                        <button type="button" class="toggle-password" data-target="new-password">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="password-requirements">
+                        <small>Password must be at least 8 characters long</small>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="confirm-password">Confirm New Password</label>
+                    <div class="password-input-container">
+                        <input type="password" id="confirm-password" required minlength="8">
+                        <button type="button" class="toggle-password" data-target="confirm-password">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="password-error-message" class="error-message"></div>
+
+                <div class="modal-actions">
+                    <button type="submit" class="change-password-btn">Change Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="js/login.js"></script>
+    <script type="module" src="js/login.js"></script>
 </body>
 
 </html>
